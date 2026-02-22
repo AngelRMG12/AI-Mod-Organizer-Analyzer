@@ -1,0 +1,58 @@
+{
+  "black face bug": {
+    "mods": ["Bijin NPCs", "AI Overhaul", "NPC Overhaul", "RaceMenu", "CBBE", "Pandorable"],
+    "confidence": 0.85,
+    "fix": "Ensure NPC overhaul mods have proper facegen data. Run CK or use a bashed patch. Check load order with LOOT.",
+    "sources": ["https://www.reddit.com/r/skyrimmods/comments/blackface"],
+    "language": "en"
+  },
+  "t-pose": {
+    "mods": ["FNIS", "Nemesis", "XP32 Maximum Skeleton", "XPMSE"],
+    "confidence": 0.9,
+    "fix": "Run FNIS or Nemesis after installing animation mods. Ensure XP32 skeleton is loaded last in animations.",
+    "sources": ["https://forums.nexusmods.com/tpose-fix"],
+    "language": "en"
+  },
+  "t pose": {
+    "mods": ["FNIS", "Nemesis", "XP32 Maximum Skeleton", "XPMSE"],
+    "confidence": 0.9,
+    "fix": "Run FNIS or Nemesis after installing animation mods. Ensure XP32 skeleton is loaded last in animations.",
+    "sources": [],
+    "language": "en"
+  },
+  "ctd loading": {
+    "mods": ["ENB", "Script extender", "SKSE", "Unofficial Skyrim Patch", "USSEP"],
+    "confidence": 0.65,
+    "fix": "Check Papyrus logs. Common causes: corrupt saves, script overload, or missing masters. Try disabling ENB.",
+    "sources": [],
+    "language": "en"
+  },
+  "missing textures": {
+    "mods": ["Texture mods", "BodySlide", "CBBE", "UNP"],
+    "confidence": 0.7,
+    "fix": "Run BodySlide and Outfit Studio. Ensure texture mods are activated and not overwritten by a blank mod.",
+    "sources": [],
+    "language": "en"
+  },
+  "npc sin cara": {
+    "mods": ["Bijin NPCs", "AI Overhaul", "NPC Overhaul", "RaceMenu", "Pandorable"],
+    "confidence": 0.85,
+    "fix": "Verifica que los mods de overhaul de NPCs tengan facegen correcto. Usa LOOT para ordenar el load order.",
+    "sources": [],
+    "language": "es"
+  },
+  "cara negra": {
+    "mods": ["Bijin NPCs", "AI Overhaul", "NPC Overhaul", "RaceMenu", "Pandorable"],
+    "confidence": 0.85,
+    "fix": "Asegúrate que los mods de NPCs estén en el orden correcto. Regenera facegen si es necesario.",
+    "sources": [],
+    "language": "es"
+  },
+  "crash al entrar": {
+    "mods": ["ENB", "SKSE", "Unofficial Skyrim Patch", "USSEP"],
+    "confidence": 0.6,
+    "fix": "Revisa los logs de Papyrus. Deshabilita ENB temporalmente para diagnosticar.",
+    "sources": [],
+    "language": "es"
+  }
+}
