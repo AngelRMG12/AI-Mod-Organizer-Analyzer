@@ -51,6 +51,7 @@ class AnalyzeResponse(BaseModel):
     suspects: list[SuspectMod]
     explanation: str
     tokens_used: Optional[int] = None
+    web_sources: Optional[list[str]] = None
 
 
 # --------------------------------------------------------------------------- #

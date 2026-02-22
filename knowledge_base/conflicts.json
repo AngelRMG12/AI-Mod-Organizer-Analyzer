@@ -44,7 +44,7 @@
   "cara negra": {
     "mods": ["Bijin NPCs", "AI Overhaul", "NPC Overhaul", "RaceMenu", "Pandorable"],
     "confidence": 0.85,
-    "fix": "Asegúrate que los mods de NPCs estén en el orden correcto. Regenera facegen si es necesario.",
+    "fix": "Asegurate que los mods de NPCs esten en el orden correcto. Regenera facegen si es necesario.",
     "sources": [],
     "language": "es"
   },

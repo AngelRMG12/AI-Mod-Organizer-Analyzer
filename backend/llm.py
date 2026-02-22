@@ -10,13 +10,17 @@ Configure via environment variables (see .env.example).
 
 import os
 from typing import Optional
+from pathlib import Path
 import httpx
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama")  # "openai" | "ollama" | "custom"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
 CUSTOM_LLM_URL = os.environ.get("CUSTOM_LLM_URL", "")
 CUSTOM_LLM_KEY = os.environ.get("CUSTOM_LLM_KEY", "")
 CUSTOM_LLM_MODEL = os.environ.get("CUSTOM_LLM_MODEL", "")
@@ -53,16 +57,26 @@ async def _call_openai(prompt: str) -> dict:
 
 
 async def _call_ollama(prompt: str) -> dict:
-    payload = {
+    # Ollama 0.3+ usa /api/chat (messages). Fallback a /api/generate por compatibilidad.
+    payload_chat = {
+        "model": OLLAMA_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False,
+    }
+    payload_generate = {
         "model": OLLAMA_MODEL,
         "prompt": prompt,
         "stream": False,
     }
     async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(f"{OLLAMA_URL}/api/generate", json=payload)
+        # Intentar primero /api/chat (versiones recientes)
+        resp = await client.post(f"{OLLAMA_URL}/api/chat", json=payload_chat)
+        if resp.status_code == 404:
+            resp = await client.post(f"{OLLAMA_URL}/api/generate", json=payload_generate)
         resp.raise_for_status()
         data = resp.json()
-        return {"content": data.get("response", ""), "tokens_used": None}
+        content = data.get("message", {}).get("content") or data.get("response", "")
+        return {"content": content or "", "tokens_used": None}
 
 
 async def _call_custom(prompt: str) -> dict:
