@@ -1,14 +1,8 @@
 """
 AI Conflict Analyzer - FastAPI Backend
-Receives mod list + bug description and returns AI-powered conflict analysis.
-Supports both local LLM (Ollama) and OpenAI-compatible APIs.
 """
 
-import os
-import json
-from pathlib import Path
 from typing import Optional
-
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -17,8 +11,8 @@ from .analyzer import run_analysis
 
 app = FastAPI(
     title="AI Conflict Analyzer",
-    description="Backend for the MO2 AI Conflict Analyzer plugin",
-    version="0.1.0",
+    description="Full-environment mod conflict analysis with real-time web search",
+    version="0.2.0",
 )
 
 app.add_middleware(
@@ -33,10 +27,33 @@ app.add_middleware(
 # Schemas                                                                       #
 # --------------------------------------------------------------------------- #
 
+class FileConflict(BaseModel):
+    file: str
+    mods: list[str]
+    winner: str
+
+
+class ModMeta(BaseModel):
+    name: str
+    version: Optional[str] = None
+    nexus_id: Optional[str] = None
+    category: Optional[str] = None
+
+
 class AnalyzeRequest(BaseModel):
+    # Core (required)
     mods: list[str]
     plugins: list[str]
     bug_description: str
+    # Extended environment data (optional, sent by the MO2 plugin)
+    load_order: Optional[list[str]] = None
+    file_conflicts: Optional[list[FileConflict]] = None
+    overwrite_files: Optional[list[str]] = None
+    mod_metadata: Optional[list[ModMeta]] = None
+    skyrim_version: Optional[str] = None
+    skse_version: Optional[str] = None
+    papyrus_errors: Optional[list[str]] = None
+    skse_errors: Optional[list[str]] = None
     game: Optional[str] = "Skyrim SE"
 
 
@@ -60,7 +77,7 @@ class AnalyzeResponse(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "0.1.0"}
+    return {"status": "ok", "version": "0.2.0"}
 
 
 @app.post("/analyze", response_model=AnalyzeResponse)
@@ -74,6 +91,14 @@ async def analyze(req: AnalyzeRequest):
         mods=req.mods,
         plugins=req.plugins,
         bug_description=req.bug_description,
-        game=req.game,
+        game=req.game or "Skyrim SE",
+        load_order=req.load_order or [],
+        file_conflicts=[fc.model_dump() for fc in (req.file_conflicts or [])],
+        overwrite_files=req.overwrite_files or [],
+        mod_metadata=[m.model_dump() for m in (req.mod_metadata or [])],
+        skyrim_version=req.skyrim_version,
+        skse_version=req.skse_version,
+        papyrus_errors=req.papyrus_errors or [],
+        skse_errors=req.skse_errors or [],
     )
     return result
