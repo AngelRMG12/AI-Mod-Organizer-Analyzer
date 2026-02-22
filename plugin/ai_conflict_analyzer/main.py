@@ -1,378 +1,370 @@
-"""
-AI Conflict Analyzer - Mod Organizer 2 Plugin
-Reads your full MO2 environment (mods, plugins, file conflicts, Skyrim version,
-Papyrus logs, SKSE logs) and uses AI + real-time web search to diagnose bugs.
-"""
-
 import os
-import sys
 import json
-import requests
+import urllib.request
+import urllib.error
 from pathlib import Path
 
+import mobase
 try:
-    import mobase
+    from PyQt6.QtWidgets import (
+        QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+        QTextEdit, QPushButton, QTextBrowser, QProgressBar,
+        QMessageBox, QCheckBox, QGroupBox, QComboBox,
+    )
+    from PyQt6.QtCore import QThread, pyqtSignal
+    from PyQt6.QtGui import QFont, QIcon
+except ImportError:
     from PyQt5.QtWidgets import (
         QDialog, QVBoxLayout, QHBoxLayout, QLabel,
         QTextEdit, QPushButton, QTextBrowser, QProgressBar,
         QMessageBox, QCheckBox, QGroupBox, QComboBox,
     )
-    from PyQt5.QtCore import Qt, QThread, pyqtSignal
+    from PyQt5.QtCore import QThread, pyqtSignal
     from PyQt5.QtGui import QFont, QIcon
-    MO2_ENV = True
-except ImportError:
-    MO2_ENV = False
 
 from .reader import collect_environment
 
 PLUGIN_VERSION = "0.2.0"
 BACKEND_URL = os.environ.get("ACA_BACKEND_URL", "http://localhost:8000")
 
+STYLE = """
+QDialog { background: #1e1e2e; color: #cdd6f4; font-family: Segoe UI; }
+QLabel  { color: #cdd6f4; }
+QGroupBox {
+    color: #89b4fa; border: 1px solid #45475a;
+    border-radius: 6px; padding: 8px; margin-top: 6px;
+}
+QGroupBox::title { subcontrol-origin: margin; left: 10px; }
+QTextEdit, QTextBrowser {
+    background: #181825; color: #cdd6f4;
+    border: 1px solid #45475a; border-radius: 6px;
+    padding: 6px; font-size: 13px;
+}
+QCheckBox { color: #cdd6f4; spacing: 6px; }
+QComboBox {
+    background: #313244; color: #cdd6f4;
+    border: 1px solid #45475a; border-radius: 4px; padding: 3px 8px;
+}
+QPushButton {
+    background: #89b4fa; color: #1e1e2e; font-weight: bold;
+    border-radius: 6px; padding: 8px 18px; border: none;
+}
+QPushButton:hover { background: #74c7ec; }
+QPushButton:disabled { background: #45475a; color: #6c7086; }
+QPushButton#secondary {
+    background: #45475a; color: #cdd6f4; font-weight: normal;
+}
+QProgressBar {
+    border: 1px solid #45475a; border-radius: 4px;
+    background: #181825; height: 8px;
+}
+QProgressBar::chunk { background: #89b4fa; border-radius: 4px; }
+"""
+
+LANG_MAP = {
+    0: "auto",
+    1: "Spanish",
+    2: "English",
+    3: "French",
+    4: "German",
+    5: "Portuguese",
+    6: "Japanese",
+}
+
 
 # --------------------------------------------------------------------------- #
-# Worker thread                                                                 #
+# Worker thread (keeps UI responsive during network calls)                      #
 # --------------------------------------------------------------------------- #
 
-if MO2_ENV:
-    class AnalysisWorker(QThread):
-        finished = pyqtSignal(dict)
-        error = pyqtSignal(str)
-        status = pyqtSignal(str)
+class AnalysisWorker(QThread):
+    finished = pyqtSignal(dict)
+    error    = pyqtSignal(str)
+    status   = pyqtSignal(str)
 
-        def __init__(self, env_data: dict, bug: str, language: str = "auto"):
-            super().__init__()
-            self.env_data = env_data
-            self.bug = bug
-            self.language = language
+    def __init__(self, payload: dict):
+        super().__init__()
+        self._payload = payload
 
-        def run(self):
-            try:
-                self.status.emit("Recolectando datos del entorno...")
-
-                payload = {
-                    "mods": self.env_data.get("mods", []),
-                    "plugins": self.env_data.get("plugins", []),
-                    "load_order": self.env_data.get("load_order", []),
-                    "bug_description": self.bug,
-                    "file_conflicts": self.env_data.get("file_conflicts", []),
-                    "overwrite_files": self.env_data.get("overwrite_files", []),
-                    "mod_metadata": self.env_data.get("mod_metadata", []),
-                    "skyrim_version": self.env_data.get("skyrim_version"),
-                    "skse_version": self.env_data.get("skse_version"),
-                    "papyrus_errors": self.env_data.get("papyrus_errors", []),
-                    "skse_errors": self.env_data.get("skse_errors", []),
-                    "response_language": self.language,
-                }
-
-                self.status.emit("Buscando en Reddit y Nexus Mods...")
-                resp = requests.post(
-                    f"{BACKEND_URL}/analyze",
-                    json=payload,
-                    timeout=60,
-                )
-                resp.raise_for_status()
-                self.finished.emit(resp.json())
-
-            except requests.exceptions.ConnectionError:
-                self.error.emit(
-                    "No se pudo conectar al backend.\n"
-                    f"¿Está corriendo en {BACKEND_URL}?\n\n"
-                    "Corre: py run_backend.py"
-                )
-            except Exception as exc:
-                self.error.emit(str(exc))
+    def run(self):
+        try:
+            self.status.emit("Buscando en Reddit y Nexus Mods...")
+            body = json.dumps(self._payload).encode("utf-8")
+            req = urllib.request.Request(
+                f"{BACKEND_URL}/analyze",
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+            self.finished.emit(result)
+        except urllib.error.URLError:
+            self.error.emit(
+                f"No se pudo conectar al backend en {BACKEND_URL}\n\n"
+                "Asegúrate de que está corriendo:\n  py run_backend.py"
+            )
+        except Exception as exc:
+            self.error.emit(str(exc))
 
 
 # --------------------------------------------------------------------------- #
 # Dialog UI                                                                     #
 # --------------------------------------------------------------------------- #
 
-    class ConflictAnalyzerDialog(QDialog):
-        def __init__(self, organizer, parent=None):
-            super().__init__(parent)
-            self.organizer = organizer
-            self._env_data = {}
-            self._build_ui()
-            self._load_environment()
+class ConflictAnalyzerDialog(QDialog):
+    def __init__(self, organizer, parent=None):
+        super().__init__(parent)
+        self._organizer = organizer
+        self._env_data  = {}
+        self._worker    = None
+        self.setStyleSheet(STYLE)
+        self._build_ui()
+        self._load_env()
 
-        def _build_ui(self):
-            self.setWindowTitle(f"AI Conflict Analyzer v{PLUGIN_VERSION}")
-            self.setMinimumSize(780, 600)
-            self.setStyleSheet("""
-                QDialog { background: #1e1e2e; color: #cdd6f4; font-family: Segoe UI; }
-                QLabel  { color: #cdd6f4; }
-                QGroupBox { color: #89b4fa; border: 1px solid #45475a; border-radius: 6px; padding: 8px; margin-top: 6px; }
-                QGroupBox::title { subcontrol-origin: margin; left: 10px; }
-                QTextEdit, QTextBrowser {
-                    background: #181825; color: #cdd6f4;
-                    border: 1px solid #45475a; border-radius: 6px;
-                    padding: 6px; font-size: 13px;
-                }
-                QCheckBox { color: #cdd6f4; }
-                QPushButton {
-                    background: #89b4fa; color: #1e1e2e; font-weight: bold;
-                    border-radius: 6px; padding: 8px 18px;
-                }
-                QPushButton:hover { background: #74c7ec; }
-                QPushButton:disabled { background: #45475a; color: #6c7086; }
-                QProgressBar {
-                    border: 1px solid #45475a; border-radius: 4px;
-                    background: #181825; height: 8px;
-                }
-                QProgressBar::chunk { background: #89b4fa; border-radius: 4px; }
-            """)
+    def _build_ui(self):
+        self.setWindowTitle(f"AI Conflict Analyzer  v{PLUGIN_VERSION}")
+        self.setMinimumSize(800, 620)
 
-            layout = QVBoxLayout(self)
-            layout.setContentsMargins(20, 20, 20, 20)
-            layout.setSpacing(10)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 20, 20, 20)
+        root.setSpacing(10)
 
-            title = QLabel(f"🔍 AI Conflict Analyzer")
-            title.setFont(QFont("Segoe UI", 16, QFont.Bold))
-            layout.addWidget(title)
+        # Title
+        title = QLabel("🔍  AI Conflict Analyzer")
+        title.setFont(QFont("Segoe UI", 16, QFont.Bold))
+        root.addWidget(title)
 
-            # Environment summary
-            self.env_label = QLabel("Cargando entorno...")
-            self.env_label.setWordWrap(True)
-            self.env_label.setStyleSheet("color: #a6e3a1; font-size: 12px;")
-            layout.addWidget(self.env_label)
+        # Environment summary
+        self.env_label = QLabel("Cargando entorno de MO2…")
+        self.env_label.setWordWrap(True)
+        self.env_label.setStyleSheet("color:#a6e3a1; font-size:12px;")
+        root.addWidget(self.env_label)
 
-            # Options
-            opts = QGroupBox("Opciones de análisis")
-            opts_layout = QHBoxLayout(opts)
-            self.chk_file_conflicts = QCheckBox("Conflictos de archivos")
-            self.chk_file_conflicts.setChecked(True)
-            self.chk_papyrus = QCheckBox("Logs Papyrus/SKSE")
-            self.chk_papyrus.setChecked(True)
-            self.chk_web = QCheckBox("Reddit/Nexus en tiempo real")
-            self.chk_web.setChecked(True)
+        # Options row
+        opts = QGroupBox("Opciones")
+        row  = QHBoxLayout(opts)
 
-            lang_label = QLabel("Idioma respuesta:")
-            lang_label.setStyleSheet("color: #a6adc8; font-size: 12px;")
-            self.lang_combo = QComboBox()
-            self.lang_combo.setStyleSheet(
-                "background: #313244; color: #cdd6f4; border: 1px solid #45475a; "
-                "border-radius: 4px; padding: 3px 8px;"
+        self.chk_conflicts = QCheckBox("Conflictos de archivos")
+        self.chk_conflicts.setChecked(True)
+        self.chk_papyrus   = QCheckBox("Logs Papyrus / SKSE")
+        self.chk_papyrus.setChecked(True)
+        self.chk_web       = QCheckBox("Reddit / Nexus tiempo real")
+        self.chk_web.setChecked(True)
+
+        row.addWidget(self.chk_conflicts)
+        row.addWidget(self.chk_papyrus)
+        row.addWidget(self.chk_web)
+        row.addStretch()
+
+        row.addWidget(QLabel("Idioma:"))
+        self.lang_combo = QComboBox()
+        self.lang_combo.addItems([
+            "🌐 Auto",  "🇲🇽 Español", "🇺🇸 English",
+            "🇫🇷 Français", "🇩🇪 Deutsch",
+            "🇧🇷 Português", "🇯🇵 日本語",
+        ])
+        row.addWidget(self.lang_combo)
+        root.addWidget(opts)
+
+        # Bug description
+        self.bug_input = QTextEdit()
+        self.bug_input.setPlaceholderText(
+            "Describe el bug…  Ej: NPCs cara negra · T-pose · "
+            "CTD al entrar a Whiterun · SkyUI no carga · animaciones rotas"
+        )
+        self.bug_input.setMaximumHeight(90)
+        root.addWidget(self.bug_input)
+
+        # Buttons
+        btns = QHBoxLayout()
+        self.btn_analyze = QPushButton("Analizar")
+        self.btn_analyze.clicked.connect(self._run)
+
+        self.btn_reload = QPushButton("↺ Recargar entorno")
+        self.btn_reload.setObjectName("secondary")
+        self.btn_reload.clicked.connect(self._load_env)
+
+        btns.addWidget(self.btn_analyze)
+        btns.addWidget(self.btn_reload)
+        btns.addStretch()
+        root.addLayout(btns)
+
+        self.lbl_status = QLabel("")
+        self.lbl_status.setStyleSheet("color:#f9e2af; font-size:12px;")
+        root.addWidget(self.lbl_status)
+
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 0)
+        self.progress.hide()
+        root.addWidget(self.progress)
+
+        self.results = QTextBrowser()
+        self.results.setOpenExternalLinks(True)
+        root.addWidget(self.results)
+
+    # ------------------------------------------------------------------ env --
+
+    def _load_env(self):
+        try:
+            profile    = self._organizer.profile()
+            profile_path = Path(profile.absolutePath())
+            mo2_base   = Path(self._organizer.basePath())
+            game_path  = Path(self._organizer.managedGame().gameDirectory().absolutePath())
+            game_docs  = Path(self._organizer.managedGame().documentsDirectory().absolutePath())
+
+            self._env_data = collect_environment(
+                profile_path=profile_path,
+                mo2_base_path=mo2_base,
+                game_path=game_path,
+                game_docs_path=game_docs,
+                include_file_conflicts=self.chk_conflicts.isChecked(),
             )
-            self.lang_combo.addItems([
-                "🌐 Auto (mismo idioma que el bug)",
-                "🇲🇽 Español",
-                "🇺🇸 English",
-                "🇫🇷 Français",
-                "🇩🇪 Deutsch",
-                "🇧🇷 Português",
-                "🇯🇵 日本語",
-            ])
-            opts_layout.addWidget(self.chk_file_conflicts)
-            opts_layout.addWidget(self.chk_papyrus)
-            opts_layout.addWidget(self.chk_web)
-            opts_layout.addStretch()
-            opts_layout.addWidget(lang_label)
-            opts_layout.addWidget(self.lang_combo)
-            layout.addWidget(opts)
 
-            # Bug input
-            self.bug_input = QTextEdit()
-            self.bug_input.setPlaceholderText(
-                "Describe el bug... Ej: NPCs con cara negra / T-pose / CTD al entrar a Whiterun / "
-                "la interfaz de SkyUI no carga / animaciones rotas..."
+            n_mods      = len(self._env_data.get("mods", []))
+            n_plugins   = len(self._env_data.get("plugins", []))
+            n_conflicts = len(self._env_data.get("file_conflicts", []))
+            n_overwrite = len(self._env_data.get("overwrite_files", []))
+            n_papyrus   = len(self._env_data.get("papyrus_errors", []))
+            sky_ver     = self._env_data.get("skyrim_version") or "versión no detectada"
+            skse_ver    = self._env_data.get("skse_version")   or "SKSE no detectado"
+
+            self.env_label.setText(
+                f"✅  {n_mods} mods · {n_plugins} plugins · "
+                f"{n_conflicts} conflictos de archivos · {n_overwrite} en overwrite · "
+                f"{n_papyrus} errores Papyrus · {sky_ver} · {skse_ver}"
             )
-            self.bug_input.setMaximumHeight(90)
-            layout.addWidget(self.bug_input)
+            self.env_label.setStyleSheet("color:#a6e3a1; font-size:12px;")
+        except Exception as exc:
+            self.env_label.setText(f"⚠️  Error cargando entorno: {exc}")
+            self.env_label.setStyleSheet("color:#f38ba8; font-size:12px;")
 
-            btn_row = QHBoxLayout()
-            self.analyze_btn = QPushButton("Analizar")
-            self.analyze_btn.clicked.connect(self._run_analysis)
-            self.reload_btn = QPushButton("↺ Recargar entorno")
-            self.reload_btn.clicked.connect(self._load_environment)
-            self.reload_btn.setStyleSheet(
-                "background: #45475a; color: #cdd6f4; font-weight: normal;"
-            )
-            btn_row.addWidget(self.analyze_btn)
-            btn_row.addWidget(self.reload_btn)
-            btn_row.addStretch()
-            layout.addLayout(btn_row)
+    # --------------------------------------------------------------- analyze --
 
-            self.status_label = QLabel("")
-            self.status_label.setStyleSheet("color: #f9e2af; font-size: 12px;")
-            layout.addWidget(self.status_label)
+    def _run(self):
+        bug = self.bug_input.toPlainText().strip()
+        if not bug:
+            QMessageBox.warning(self, "Sin descripción", "Escribe el bug antes de analizar.")
+            return
 
-            self.progress = QProgressBar()
-            self.progress.setRange(0, 0)
-            self.progress.hide()
-            layout.addWidget(self.progress)
+        env = dict(self._env_data)
+        if not self.chk_papyrus.isChecked():
+            env["papyrus_errors"] = []
+            env["skse_errors"]    = []
+        if not self.chk_conflicts.isChecked():
+            env["file_conflicts"] = []
 
-            self.results = QTextBrowser()
-            self.results.setOpenExternalLinks(True)
-            layout.addWidget(self.results)
+        payload = {
+            "mods":             env.get("mods", []),
+            "plugins":          env.get("plugins", []),
+            "load_order":       env.get("load_order", []),
+            "bug_description":  bug,
+            "file_conflicts":   env.get("file_conflicts", []),
+            "overwrite_files":  env.get("overwrite_files", []),
+            "mod_metadata":     env.get("mod_metadata", []),
+            "skyrim_version":   env.get("skyrim_version"),
+            "skse_version":     env.get("skse_version"),
+            "papyrus_errors":   env.get("papyrus_errors", []),
+            "skse_errors":      env.get("skse_errors", []),
+            "response_language": LANG_MAP.get(self.lang_combo.currentIndex(), "auto"),
+        }
 
-        def _load_environment(self):
-            try:
-                profile = self.organizer.profile()
-                profile_path = Path(profile.absolutePath())
-                mo2_base = Path(self.organizer.basePath())
-                game_path = Path(self.organizer.managedGame().gameDirectory().absolutePath())
-                game_docs = Path(self.organizer.managedGame().documentsDirectory().absolutePath())
+        self.btn_analyze.setEnabled(False)
+        self.progress.show()
+        self.results.clear()
 
-                self._env_data = collect_environment(
-                    profile_path=profile_path,
-                    mo2_base_path=mo2_base,
-                    game_path=game_path,
-                    game_docs_path=game_docs,
-                    include_file_conflicts=self.chk_file_conflicts.isChecked(),
-                )
+        self._worker = AnalysisWorker(payload)
+        self._worker.status.connect(self.lbl_status.setText)
+        self._worker.finished.connect(self._on_done)
+        self._worker.error.connect(self._on_error)
+        self._worker.start()
 
-                mods_count = len(self._env_data.get("mods", []))
-                plugins_count = len(self._env_data.get("plugins", []))
-                conflicts_count = len(self._env_data.get("file_conflicts", []))
-                overwrite_count = len(self._env_data.get("overwrite_files", []))
-                papyrus_count = len(self._env_data.get("papyrus_errors", []))
-                sky_ver = self._env_data.get("skyrim_version") or "no detectada"
-                skse_ver = self._env_data.get("skse_version") or "no detectado"
+    def _on_done(self, result: dict):
+        self.progress.hide()
+        self.btn_analyze.setEnabled(True)
+        self.lbl_status.setText("")
+        self.results.setHtml(_format(result))
 
-                self.env_label.setText(
-                    f"✅ {mods_count} mods activos · {plugins_count} plugins · "
-                    f"{conflicts_count} conflictos de archivos · {overwrite_count} en overwrite · "
-                    f"{papyrus_count} errores Papyrus · {sky_ver} · {skse_ver}"
-                )
-            except Exception as exc:
-                self.env_label.setText(f"⚠️ Error cargando entorno: {exc}")
-                self.env_label.setStyleSheet("color: #f38ba8; font-size: 12px;")
-
-        def _run_analysis(self):
-            bug = self.bug_input.toPlainText().strip()
-            if not bug:
-                QMessageBox.warning(self, "Falta descripción", "Describe el bug antes de analizar.")
-                return
-            if not self._env_data.get("mods"):
-                QMessageBox.warning(self, "Sin datos", "No se pudo leer el entorno de MO2. Recarga primero.")
-                return
-
-            env_data = dict(self._env_data)
-            if not self.chk_papyrus.isChecked():
-                env_data["papyrus_errors"] = []
-                env_data["skse_errors"] = []
-            if not self.chk_file_conflicts.isChecked():
-                env_data["file_conflicts"] = []
-
-            # Map combo selection to language code
-            lang_map = {
-                0: "auto", 1: "Spanish", 2: "English",
-                3: "French", 4: "German", 5: "Portuguese", 6: "Japanese",
-            }
-            language = lang_map.get(self.lang_combo.currentIndex(), "auto")
-
-            self.analyze_btn.setEnabled(False)
-            self.progress.show()
-            self.results.setPlainText("Analizando...")
-
-            self._worker = AnalysisWorker(env_data, bug, language)
-            self._worker.status.connect(self._on_status)
-            self._worker.finished.connect(self._on_finished)
-            self._worker.error.connect(self._on_error)
-            self._worker.start()
-
-        def _on_status(self, msg: str):
-            self.status_label.setText(msg)
-
-        def _on_finished(self, result: dict):
-            self.progress.hide()
-            self.status_label.setText("")
-            self.analyze_btn.setEnabled(True)
-            self.results.setHtml(self._format_results(result))
-
-        def _on_error(self, msg: str):
-            self.progress.hide()
-            self.status_label.setText("")
-            self.analyze_btn.setEnabled(True)
-            self.results.setPlainText(f"Error:\n{msg}")
-
-        @staticmethod
-        def _format_results(result: dict) -> str:
-            html = "<style>body{font-family:Segoe UI;color:#cdd6f4;background:#181825;line-height:1.5}</style>"
-
-            suspects = result.get("suspects", [])
-            explanation = result.get("explanation", "")
-            web_sources = result.get("web_sources", [])
-
-            if not suspects and not explanation:
-                html += "<p>No se encontraron conflictos. Intenta con una descripción más detallada.</p>"
-                return html
-
-            if suspects:
-                html += "<h3 style='color:#a6e3a1'>🎯 Mods sospechosos</h3><ul>"
-                for s in suspects:
-                    pct = int(s["confidence"] * 100)
-                    color = "#a6e3a1" if pct >= 70 else "#f9e2af" if pct >= 40 else "#cdd6f4"
-                    html += (
-                        f"<li style='margin-bottom:10px'>"
-                        f"<b style='color:#89b4fa;font-size:14px'>{s['mod']}</b> "
-                        f"<span style='color:{color}'>{pct}% probabilidad</span><br>"
-                        f"<small style='color:#bac2de'>{s.get('reason', '')}</small><br>"
-                        f"<small style='color:#f9e2af'>💡 {s.get('fix', '')}</small>"
-                        f"</li>"
-                    )
-                html += "</ul>"
-
-            if explanation:
-                clean = explanation.replace("\n", "<br>")
-                # Remove the raw JSON block from display
-                import re
-                clean = re.sub(r"```json.*?```", "", clean, flags=re.DOTALL)
-                html += f"<h3 style='color:#cba6f7'>📝 Análisis completo</h3><p>{clean}</p>"
-
-            if web_sources:
-                html += "<h3 style='color:#74c7ec'>🌐 Fuentes consultadas</h3><ul>"
-                for url in web_sources:
-                    html += f"<li><a href='{url}' style='color:#89b4fa'>{url}</a></li>"
-                html += "</ul>"
-
-            return html
+    def _on_error(self, msg: str):
+        self.progress.hide()
+        self.btn_analyze.setEnabled(True)
+        self.lbl_status.setText("")
+        self.results.setPlainText(f"Error:\n{msg}")
 
 
 # --------------------------------------------------------------------------- #
-# MO2 plugin registration                                                       #
+# HTML formatter                                                                #
 # --------------------------------------------------------------------------- #
 
-    class AIConflictAnalyzerPlugin(mobase.IPluginTool):
-        def __init__(self):
-            super().__init__()
-            self._organizer = None
+def _format(result: dict) -> str:
+    import re
+    html = "<style>body{font-family:Segoe UI;color:#cdd6f4;background:#181825;line-height:1.5}</style>"
 
-        def init(self, organizer: mobase.IOrganizer) -> bool:
-            self._organizer = organizer
-            return True
+    suspects    = result.get("suspects", [])
+    explanation = result.get("explanation", "")
+    sources     = result.get("web_sources", [])
 
-        def name(self) -> str:
-            return "AI Conflict Analyzer"
+    if suspects:
+        html += "<h3 style='color:#a6e3a1'>🎯 Mods sospechosos</h3><ul>"
+        for s in suspects:
+            pct   = int(s["confidence"] * 100)
+            color = "#a6e3a1" if pct >= 70 else "#f9e2af" if pct >= 40 else "#cdd6f4"
+            html += (
+                f"<li style='margin-bottom:10px'>"
+                f"<b style='color:#89b4fa;font-size:14px'>{s['mod']}</b> "
+                f"<span style='color:{color}'>{pct}%</span><br>"
+                f"<small style='color:#bac2de'>{s.get('reason','')}</small><br>"
+                f"<small style='color:#f9e2af'>💡 {s.get('fix','')}</small>"
+                f"</li>"
+            )
+        html += "</ul>"
 
-        def author(self) -> str:
-            return "AngelRMG12"
+    if explanation:
+        clean = re.sub(r"```json.*?```", "", explanation, flags=re.DOTALL)
+        clean = clean.replace("\n", "<br>")
+        html += f"<h3 style='color:#cba6f7'>📝 Análisis</h3><p>{clean}</p>"
 
-        def description(self) -> str:
-            return "Full-environment AI conflict analysis with real-time web search."
+    if sources:
+        html += "<h3 style='color:#74c7ec'>🌐 Fuentes</h3><ul>"
+        for url in sources:
+            html += f"<li><a href='{url}' style='color:#89b4fa'>{url}</a></li>"
+        html += "</ul>"
 
-        def version(self) -> mobase.VersionInfo:
-            return mobase.VersionInfo(0, 2, 0, mobase.ReleaseType.FINAL)
+    if not suspects and not explanation:
+        html += "<p>Sin resultados. Intenta con una descripción más detallada.</p>"
 
-        def isActive(self) -> bool:
-            return True
-
-        def settings(self) -> list:
-            return []
-
-        def displayName(self) -> str:
-            return "AI Conflict Analyzer"
-
-        def tooltip(self) -> str:
-            return "Analyze your full mod environment with AI + real-time web search"
-
-        def icon(self) -> QIcon:
-            return QIcon()
-
-        def display(self) -> None:
-            dialog = ConflictAnalyzerDialog(self._organizer)
-            dialog.exec_()
+    return html
 
 
-    def createPlugin() -> mobase.IPlugin:
-        return AIConflictAnalyzerPlugin()
+# --------------------------------------------------------------------------- #
+# MO2 plugin registration — createPlugin MUST be at module level               #
+# --------------------------------------------------------------------------- #
+
+class AIConflictAnalyzerPlugin(mobase.IPluginTool):
+
+    def __init__(self):
+        super().__init__()
+        self._organizer = None
+
+    def init(self, organizer: mobase.IOrganizer) -> bool:
+        self._organizer = organizer
+        return True
+
+    def name(self)        -> str: return "AI Conflict Analyzer"
+    def author(self)      -> str: return "AngelRMG12"
+    def description(self) -> str: return "AI-powered mod conflict analysis with real-time web search."
+    def isActive(self)    -> bool: return True
+    def settings(self)    -> list: return []
+    def displayName(self) -> str: return "AI Conflict Analyzer"
+    def tooltip(self)     -> str: return "Analyze mod conflicts with AI + Reddit/Nexus search"
+    def icon(self)        -> QIcon: return QIcon()
+
+    def version(self) -> mobase.VersionInfo:
+        return mobase.VersionInfo(0, 2, 0, mobase.ReleaseType.FINAL)
+
+    def display(self) -> None:
+        dlg = ConflictAnalyzerDialog(self._organizer)
+        dlg.exec_()
+
+
+def createPlugin() -> mobase.IPlugin:
+    return AIConflictAnalyzerPlugin()

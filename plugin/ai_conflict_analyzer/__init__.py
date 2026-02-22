@@ -1,1 +1,1 @@
-# AI Conflict Analyzer - MO2 Plugin
+from .main import createPlugin
