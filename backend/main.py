@@ -55,6 +55,7 @@ class AnalyzeRequest(BaseModel):
     papyrus_errors: Optional[list[str]] = None
     skse_errors: Optional[list[str]] = None
     game: Optional[str] = "Skyrim SE"
+    response_language: Optional[str] = "auto"
 
 
 class SuspectMod(BaseModel):
@@ -100,5 +101,6 @@ async def analyze(req: AnalyzeRequest):
         skse_version=req.skse_version,
         papyrus_errors=req.papyrus_errors or [],
         skse_errors=req.skse_errors or [],
+        response_language=req.response_language or "auto",
     )
     return result

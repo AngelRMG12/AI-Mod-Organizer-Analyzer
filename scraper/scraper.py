@@ -28,17 +28,44 @@ KB_PATH = Path(__file__).parent.parent / "knowledge_base" / "conflicts.json"
 
 # Keywords to search for bug reports (multilingual)
 SEARCH_KEYWORDS = [
-    # English
-    "skyrim mod conflict", "mod bug fix", "black face bug skyrim",
-    "t-pose skyrim mod", "CTD mod conflict", "papyrus log error mod",
-    # Spanish
-    "conflicto mods skyrim", "bug mods skyrim solución",
+    # English — specific bugs
+    "skyrim black face bug fix mod organizer",
+    "skyrim t-pose animation fix FNIS nemesis",
+    "skyrim CTD crash on load mod conflict",
+    "papyrus log error script mod conflict",
+    "skyrim missing textures purple mesh fix",
+    "skyrim infinite loading screen mod fix",
+    "skyrim NPC invisible missing head fix",
+    "skyrim freezing stuttering mod conflict",
+    "skyrim SkyUI interface not loading fix",
+    "SKSE plugin failed to load skyrim",
+    "skyrim mod load order conflict LOOT fix",
+    "skyrim overwrite conflict mod organizer fix",
+    "skyrim facegen data missing NPC overhaul",
+    "skyrim animation not playing XP32 skeleton fix",
+    "RaceMenu crash CTD skyrim fix",
+    # Spanish — bugs específicos
+    "skyrim cara negra npc arreglo mod organizer",
+    "skyrim t-pose animaciones arreglo FNIS",
+    "skyrim crash carga conflicto mods solución",
+    "skyrim texturas moradas arreglo",
+    "skyrim pantalla de carga infinita mods",
+    "error papyrus skyrim conflicto mods",
     # French
-    "conflit mods skyrim", "bug mods skyrim correction",
+    "skyrim visage noir npc correction mod",
+    "skyrim t-pose animation correction FNIS",
+    "skyrim crash chargement conflit mods",
     # German
-    "mod konflikt skyrim", "skyrim mod fehler",
+    "skyrim schwarzes gesicht npc mod konflikt lösung",
+    "skyrim t-pose animation fehler beheben",
+    "skyrim absturz ladebildschirm mod konflikt",
     # Portuguese
-    "conflito mods skyrim", "bug mods skyrim solução",
+    "skyrim rosto preto npc correção mod",
+    "skyrim crash carregamento conflito mods solução",
+    # Fallout 4
+    "fallout 4 mod conflict crash fix",
+    "fallout 4 missing textures mod organizer",
+    "fallout 4 CTD load order conflict fix",
 ]
 
 SOURCES = [

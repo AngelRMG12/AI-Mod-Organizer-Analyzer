@@ -15,7 +15,7 @@ try:
     from PyQt5.QtWidgets import (
         QDialog, QVBoxLayout, QHBoxLayout, QLabel,
         QTextEdit, QPushButton, QTextBrowser, QProgressBar,
-        QMessageBox, QCheckBox, QGroupBox,
+        QMessageBox, QCheckBox, QGroupBox, QComboBox,
     )
     from PyQt5.QtCore import Qt, QThread, pyqtSignal
     from PyQt5.QtGui import QFont, QIcon
@@ -39,10 +39,11 @@ if MO2_ENV:
         error = pyqtSignal(str)
         status = pyqtSignal(str)
 
-        def __init__(self, env_data: dict, bug: str):
+        def __init__(self, env_data: dict, bug: str, language: str = "auto"):
             super().__init__()
             self.env_data = env_data
             self.bug = bug
+            self.language = language
 
         def run(self):
             try:
@@ -60,6 +61,7 @@ if MO2_ENV:
                     "skse_version": self.env_data.get("skse_version"),
                     "papyrus_errors": self.env_data.get("papyrus_errors", []),
                     "skse_errors": self.env_data.get("skse_errors", []),
+                    "response_language": self.language,
                 }
 
                 self.status.emit("Buscando en Reddit y Nexus Mods...")
@@ -137,15 +139,35 @@ if MO2_ENV:
             # Options
             opts = QGroupBox("Opciones de análisis")
             opts_layout = QHBoxLayout(opts)
-            self.chk_file_conflicts = QCheckBox("Analizar conflictos de archivos")
+            self.chk_file_conflicts = QCheckBox("Conflictos de archivos")
             self.chk_file_conflicts.setChecked(True)
-            self.chk_papyrus = QCheckBox("Incluir logs de Papyrus/SKSE")
+            self.chk_papyrus = QCheckBox("Logs Papyrus/SKSE")
             self.chk_papyrus.setChecked(True)
-            self.chk_web = QCheckBox("Búsqueda en tiempo real (Reddit/Nexus)")
+            self.chk_web = QCheckBox("Reddit/Nexus en tiempo real")
             self.chk_web.setChecked(True)
+
+            lang_label = QLabel("Idioma respuesta:")
+            lang_label.setStyleSheet("color: #a6adc8; font-size: 12px;")
+            self.lang_combo = QComboBox()
+            self.lang_combo.setStyleSheet(
+                "background: #313244; color: #cdd6f4; border: 1px solid #45475a; "
+                "border-radius: 4px; padding: 3px 8px;"
+            )
+            self.lang_combo.addItems([
+                "🌐 Auto (mismo idioma que el bug)",
+                "🇲🇽 Español",
+                "🇺🇸 English",
+                "🇫🇷 Français",
+                "🇩🇪 Deutsch",
+                "🇧🇷 Português",
+                "🇯🇵 日本語",
+            ])
             opts_layout.addWidget(self.chk_file_conflicts)
             opts_layout.addWidget(self.chk_papyrus)
             opts_layout.addWidget(self.chk_web)
+            opts_layout.addStretch()
+            opts_layout.addWidget(lang_label)
+            opts_layout.addWidget(self.lang_combo)
             layout.addWidget(opts)
 
             # Bug input
@@ -232,11 +254,18 @@ if MO2_ENV:
             if not self.chk_file_conflicts.isChecked():
                 env_data["file_conflicts"] = []
 
+            # Map combo selection to language code
+            lang_map = {
+                0: "auto", 1: "Spanish", 2: "English",
+                3: "French", 4: "German", 5: "Portuguese", 6: "Japanese",
+            }
+            language = lang_map.get(self.lang_combo.currentIndex(), "auto")
+
             self.analyze_btn.setEnabled(False)
             self.progress.show()
             self.results.setPlainText("Analizando...")
 
-            self._worker = AnalysisWorker(env_data, bug)
+            self._worker = AnalysisWorker(env_data, bug, language)
             self._worker.status.connect(self._on_status)
             self._worker.finished.connect(self._on_finished)
             self._worker.error.connect(self._on_error)

@@ -27,6 +27,7 @@ async def run_analysis(
     skse_version: Optional[str] = None,
     papyrus_errors: Optional[list[str]] = None,
     skse_errors: Optional[list[str]] = None,
+    response_language: str = "auto",
 ) -> dict:
     # 1. Local heuristic pass
     local_hits = local_heuristic_search(mods, bug_description, KB)
@@ -55,6 +56,7 @@ async def run_analysis(
         skse_version=skse_version,
         papyrus_errors=papyrus_errors or [],
         skse_errors=skse_errors or [],
+        response_language=response_language,
     )
 
     # 4. Call LLM
@@ -84,6 +86,7 @@ def _build_prompt(
     mods, plugins, bug, game, local_hits, web_results,
     load_order, file_conflicts, overwrite_files, mod_metadata,
     skyrim_version, skse_version, papyrus_errors, skse_errors,
+    response_language: str = "auto",
 ) -> str:
     sections = []
 
@@ -158,14 +161,20 @@ def _build_prompt(
     if web_str:
         sections.append(web_str)
 
+    # Language instruction
+    if response_language == "auto":
+        lang_instruction = "Respond in the SAME language the user used in their bug description."
+    else:
+        lang_instruction = f"ALWAYS respond in {response_language}, regardless of the language used in the bug description."
+
     # Instructions
     sections.append(
         "INSTRUCTIONS:\n"
-        "1. Prioritize the REAL FILE CONFLICTS and PAPYRUS ERRORS — these are definitive evidence.\n"
-        "2. Use web search results as supporting evidence from the community.\n"
-        "3. Identify suspect mods with confidence scores (0.0-1.0) and specific fixes.\n"
-        "4. Respond in the same language the user used.\n"
-        "5. Be specific: name exact files, exact load order positions, exact steps to fix.\n"
+        "1. Prioritize REAL FILE CONFLICTS and PAPYRUS ERRORS — these are hard evidence.\n"
+        "2. Use web search results as community evidence.\n"
+        "3. Identify suspect mods with confidence scores (0.0-1.0) and specific, actionable fixes.\n"
+        f"4. {lang_instruction}\n"
+        "5. Be specific: mention exact files, exact load order positions, exact steps.\n"
         "6. At the END output a JSON array in ```json ... ``` block:\n"
         '   [{"mod": "...", "confidence": 0.0, "reason": "...", "fix": "..."}]'
     )
