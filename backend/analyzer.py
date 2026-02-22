@@ -167,16 +167,20 @@ def _build_prompt(
     else:
         lang_instruction = f"ALWAYS respond in {response_language}, regardless of the language used in the bug description."
 
-    # Instructions
+    # Build the exact mod name list for the prompt so the LLM can't hallucinate
+    mod_names_str = ", ".join(f'"{m}"' for m in mods[:80])
+
     sections.append(
-        "INSTRUCTIONS:\n"
-        "1. Prioritize REAL FILE CONFLICTS and PAPYRUS ERRORS — these are hard evidence.\n"
-        "2. Use web search results as community evidence.\n"
-        "3. Identify suspect mods with confidence scores (0.0-1.0) and specific, actionable fixes.\n"
-        f"4. {lang_instruction}\n"
-        "5. Be specific: mention exact files, exact load order positions, exact steps.\n"
-        "6. At the END output a JSON array in ```json ... ``` block:\n"
-        '   [{"mod": "...", "confidence": 0.0, "reason": "...", "fix": "..."}]'
+        "CRITICAL RULES — FOLLOW EXACTLY:\n"
+        f"1. ONLY use mod names from this list: [{mod_names_str}]\n"
+        "   NEVER invent mod names like 'Mod XYZ', 'ModA', 'ABC' or any name not in the list above.\n"
+        "2. Prioritize REAL FILE CONFLICTS and PAPYRUS ERRORS — these are hard evidence.\n"
+        "3. Use web search results as supporting community evidence.\n"
+        "4. Assign confidence 0.0-1.0 based on actual evidence, not guesses.\n"
+        f"5. {lang_instruction}\n"
+        "6. Be specific: mention exact files, exact positions, exact steps to fix.\n"
+        "7. At the END output a JSON array in ```json ... ``` block:\n"
+        '   [{"mod": "EXACT_MOD_NAME_FROM_LIST", "confidence": 0.0, "reason": "...", "fix": "..."}]'
     )
 
     return "\n\n".join(sections)

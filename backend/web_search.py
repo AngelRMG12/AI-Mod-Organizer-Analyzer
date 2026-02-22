@@ -23,11 +23,11 @@ SUBREDDITS = ["skyrimmods", "FalloutMods", "fo4mods", "Morrowind", "oblivionmods
 async def search_reddit(query: str, limit: int = 5) -> list[dict]:
     """
     Searches Reddit via the public JSON API (no auth needed).
-    Returns posts with title, text snippet, and URL.
+    restrict_sr=1 forces results to stay inside r/skyrimmods only.
     """
     results = []
     encoded = quote_plus(query)
-    url = f"https://www.reddit.com/r/skyrimmods/search.json?q={encoded}&limit={limit}&sort=relevance&t=all"
+    url = f"https://www.reddit.com/r/skyrimmods/search.json?q={encoded}&restrict_sr=1&limit={limit}&sort=relevance&t=all"
 
     try:
         async with httpx.AsyncClient(headers=HEADERS, timeout=10, follow_redirects=True) as client:
@@ -124,11 +124,11 @@ async def search_nexus_forum(query: str, limit: int = 5) -> list[dict]:
 async def search_all(bug_description: str, mods: list[str]) -> list[dict]:
     """
     Runs Reddit and Nexus searches in parallel.
-    Builds a smart query combining the bug description with mod names.
+    Builds a focused query using the bug description only (no mod names —
+    they make the query too long and drift to wrong subreddits).
     """
-    # Build focused search query
-    top_mods = " ".join(mods[:3]) if mods else ""
-    query = f"{bug_description} skyrim mod {top_mods}".strip()
+    # Keep query short and specific — just the bug + skyrim
+    query = f"skyrim {bug_description}"[:120]
 
     reddit_task = search_reddit(query)
     nexus_task = search_nexus_forum(query)

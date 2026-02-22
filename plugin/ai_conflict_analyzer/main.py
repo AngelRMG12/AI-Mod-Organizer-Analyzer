@@ -131,7 +131,7 @@ class ConflictAnalyzerDialog(QDialog):
 
         # Title
         title = QLabel("🔍  AI Conflict Analyzer")
-        title.setFont(QFont("Segoe UI", 16, QFont.Bold))
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #cdd6f4;")
         root.addWidget(title)
 
         # Environment summary
@@ -363,7 +363,10 @@ class AIConflictAnalyzerPlugin(mobase.IPluginTool):
 
     def display(self) -> None:
         dlg = ConflictAnalyzerDialog(self._organizer)
-        dlg.exec_()
+        try:
+            dlg.exec()
+        except AttributeError:
+            dlg.exec_()
 
 
 def createPlugin() -> mobase.IPlugin:
