@@ -9,17 +9,17 @@ try:
     from PyQt6.QtWidgets import (
         QDialog, QVBoxLayout, QHBoxLayout, QLabel,
         QTextEdit, QPushButton, QTextBrowser, QProgressBar,
-        QMessageBox, QCheckBox, QGroupBox, QComboBox,
+        QMessageBox, QCheckBox, QGroupBox, QComboBox, QFileDialog,
     )
-    from PyQt6.QtCore import QThread, pyqtSignal
+    from PyQt6.QtCore import QThread, pyqtSignal, Qt
     from PyQt6.QtGui import QFont, QIcon
 except ImportError:
     from PyQt5.QtWidgets import (
         QDialog, QVBoxLayout, QHBoxLayout, QLabel,
         QTextEdit, QPushButton, QTextBrowser, QProgressBar,
-        QMessageBox, QCheckBox, QGroupBox, QComboBox,
+        QMessageBox, QCheckBox, QGroupBox, QComboBox, QFileDialog,
     )
-    from PyQt5.QtCore import QThread, pyqtSignal
+    from PyQt5.QtCore import QThread, pyqtSignal, Qt
     from PyQt5.QtGui import QFont, QIcon
 
 from .reader import collect_environment
@@ -117,6 +117,7 @@ class ConflictAnalyzerDialog(QDialog):
         self._organizer = organizer
         self._env_data  = {}
         self._worker    = None
+        self._last_result = None
         self.setStyleSheet(STYLE)
         self._build_ui()
         self._load_env()
@@ -184,8 +185,13 @@ class ConflictAnalyzerDialog(QDialog):
         self.btn_reload.setObjectName("secondary")
         self.btn_reload.clicked.connect(self._load_env)
 
+        self.btn_save = QPushButton("💾 Guardar reporte")
+        self.btn_save.setObjectName("secondary")
+        self.btn_save.clicked.connect(self._save_report)
+
         btns.addWidget(self.btn_analyze)
         btns.addWidget(self.btn_reload)
+        btns.addWidget(self.btn_save)
         btns.addStretch()
         root.addLayout(btns)
 
@@ -261,11 +267,12 @@ class ConflictAnalyzerDialog(QDialog):
             "file_conflicts":   env.get("file_conflicts", []),
             "overwrite_files":  env.get("overwrite_files", []),
             "mod_metadata":     env.get("mod_metadata", []),
-            "skyrim_version":   env.get("skyrim_version"),
+            "skyrim_version":  env.get("skyrim_version"),
             "skse_version":     env.get("skse_version"),
             "papyrus_errors":   env.get("papyrus_errors", []),
             "skse_errors":      env.get("skse_errors", []),
             "response_language": LANG_MAP.get(self.lang_combo.currentIndex(), "auto"),
+            "include_web_search": self.chk_web.isChecked(),
         }
 
         self.btn_analyze.setEnabled(False)
@@ -282,7 +289,42 @@ class ConflictAnalyzerDialog(QDialog):
         self.progress.hide()
         self.btn_analyze.setEnabled(True)
         self.lbl_status.setText("")
+        self._last_result = result
         self.results.setHtml(_format(result))
+
+    def _save_report(self):
+        if not self._last_result:
+            QMessageBox.information(self, "Sin datos", "Analiza primero para poder guardar el reporte.")
+            return
+        try:
+            from datetime import datetime
+            default_name = f"AI-Conflict-Report-{datetime.now().strftime('%Y%m%d-%H%M')}.html"
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Guardar reporte", default_name,
+                "HTML (*.html);;Texto plano (*.txt);;Todos (*.*)",
+            )
+            if not path:
+                return
+            html = _format(self._last_result)
+            if path.lower().endswith(".html"):
+                full_html = f"<!DOCTYPE html><html><head><meta charset='utf-8'/></head><body>{html}</body></html>"
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(full_html)
+            else:
+                # txt: versión legible sin HTML
+                lines = []
+                for s in self._last_result.get("suspects", []):
+                    lines.append(f"- {s['mod']} ({int(s['confidence']*100)}%): {s.get('reason','')}")
+                    lines.append(f"  💡 {s.get('fix','')}")
+                lines.append("")
+                lines.append(self._last_result.get("explanation", "").replace("\n", " "))
+                for url in self._last_result.get("web_sources", []):
+                    lines.append(url)
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write("\n".join(lines))
+            QMessageBox.information(self, "Guardado", f"Reporte guardado en:\n{path}")
+        except Exception as exc:
+            QMessageBox.critical(self, "Error", f"No se pudo guardar: {exc}")
 
     def _on_error(self, msg: str):
         self.progress.hide()
@@ -302,7 +344,10 @@ def _format(result: dict) -> str:
     suspects    = result.get("suspects", [])
     explanation = result.get("explanation", "")
     sources     = result.get("web_sources", [])
+    brief       = result.get("investigation_brief", "")
 
+    if brief:
+        html += f"<h3 style='color:#89b4fa'>🔬 Investigación local</h3><p style='color:#bac2de;font-size:12px'>{brief}</p>"
     if suspects:
         html += "<h3 style='color:#a6e3a1'>🎯 Mods sospechosos</h3><ul>"
         for s in suspects:
@@ -323,11 +368,14 @@ def _format(result: dict) -> str:
         clean = clean.replace("\n", "<br>")
         html += f"<h3 style='color:#cba6f7'>📝 Análisis</h3><p>{clean}</p>"
 
+    html += "<h3 style='color:#74c7ec'>🌐 Fuentes</h3>"
     if sources:
-        html += "<h3 style='color:#74c7ec'>🌐 Fuentes</h3><ul>"
+        html += "<ul>"
         for url in sources:
-            html += f"<li><a href='{url}' style='color:#89b4fa'>{url}</a></li>"
+            html += f"<li><a href='{url}' style='color:#89b4fa' target='_blank'>{url}</a></li>"
         html += "</ul>"
+    else:
+        html += "<p style='color:#6c7086'>No se encontraron fuentes relevantes (el filtro local descartó resultados no relacionados con tu bug).</p>"
 
     if not suspects and not explanation:
         html += "<p>Sin resultados. Intenta con una descripción más detallada.</p>"
@@ -362,11 +410,16 @@ class AIConflictAnalyzerPlugin(mobase.IPluginTool):
         return mobase.VersionInfo(0, 2, 0, mobase.ReleaseType.FINAL)
 
     def display(self) -> None:
+        """Abre el diálogo en modo no modal: puedes editar la mod list mientras está abierto."""
         dlg = ConflictAnalyzerDialog(self._organizer)
-        try:
-            dlg.exec()
-        except AttributeError:
-            dlg.exec_()
+        non_modal = getattr(Qt.WindowModality, "NonModal", None) or getattr(Qt, "NonModal", 0)
+        dlg.setWindowModality(non_modal)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        if not hasattr(self, "_dialogs"):
+            self._dialogs = []
+        self._dialogs.append(dlg)
 
 
 def createPlugin() -> mobase.IPlugin:

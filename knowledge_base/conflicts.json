@@ -54,5 +54,19 @@
     "fix": "Revisa los logs de Papyrus. Deshabilita ENB temporalmente para diagnosticar.",
     "sources": [],
     "language": "es"
+  },
+  "ojos brillosos": {
+    "mods": ["ENB", "The Eyes Of Beauty", "Kala", "Eye", "RaceMenu", "skin", "Specular", "Lighting"],
+    "confidence": 0.8,
+    "fix": "Reduce ENB specular/gloss. Revisa textures/actors/character/eyes. Solo un mod de ojos activo.",
+    "sources": [],
+    "language": "es"
+  },
+  "shiny eyes": {
+    "mods": ["ENB", "The Eyes Of Beauty", "Kala", "Eye", "RaceMenu", "skin", "Specular", "Lighting"],
+    "confidence": 0.8,
+    "fix": "Lower ENB specular. One eye texture mod. Check textures/actors/character/eyes for overwrites.",
+    "sources": [],
+    "language": "en"
   }
 }

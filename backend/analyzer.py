@@ -8,10 +8,41 @@ from typing import Optional
 
 from .llm import call_llm
 from .knowledge import load_knowledge_base, local_heuristic_search
-from .web_search import search_all, format_search_results_for_prompt
+from .web_search import search_with_queries, format_search_results_for_prompt
+from .local_investigator import investigate
+from .search_planner import generate_search_queries, extract_filter_words
 
 log = logging.getLogger(__name__)
 KB = load_knowledge_base()
+
+
+def _prefilter_mods(mods: list[str], bug: str, file_conflicts: list[dict], priority_mods: list[str]) -> list[str]:
+    """
+    Mods relevantes: conflictos reales + mods que comparten palabras con el bug + priority del investigador.
+    Sin hardcode.
+    """
+    relevant = set()
+
+    # 1. Conflictos de archivos
+    for c in file_conflicts[:50]:
+        for m in c.get("mods", []):
+            relevant.add(m)
+
+    # 2. Mods cuya nombre contiene palabra del bug (3+ chars)
+    bug_words = {w.lower() for w in bug.split() if len(w) >= 3}
+    for mod in mods:
+        m = mod.lower()
+        if any(w in m for w in bug_words):
+            relevant.add(mod)
+
+    # 3. Prioridad del investigador
+    relevant.update(priority_mods[:15])
+
+    # 4. Primeros mods si muy pocos
+    if len(relevant) < 8:
+        relevant.update(mods[:25])
+
+    return [m for m in mods if m in relevant][:45]
 
 
 async def run_analysis(
@@ -28,26 +59,50 @@ async def run_analysis(
     papyrus_errors: Optional[list[str]] = None,
     skse_errors: Optional[list[str]] = None,
     response_language: str = "auto",
+    include_web_search: bool = True,
 ) -> dict:
-    # 1. Local heuristic pass
+    # 1. Investigador local: analiza archivos (sin hardcode)
+    inv = investigate(
+        bug_description,
+        file_conflicts or [],
+        overwrite_files or [],
+        mods,
+    )
+    log.info(f"Investigator brief: {inv['brief'][:80]}...")
+
+    # 2. Prefilter mods (dinámico: conflictos + palabras del bug)
+    relevant_mods = _prefilter_mods(mods, bug_description, file_conflicts or [], inv.get("priority_mods", []))
+    log.info(f"Mods: {len(mods)} → {len(relevant_mods)} relevant")
+
+    # 3. LLM genera queries + filter keywords (cero hardcode)
+    search_queries = []
+    filter_words = []
+    if include_web_search:
+        search_queries, filter_words = await generate_search_queries(bug_description, relevant_mods)
+        log.info(f"Queries: {search_queries[:3]}, filter: {filter_words[:4]}")
+
+    # 4. Búsqueda: scraper + Reddit, filtrada por keywords del LLM
     local_hits = local_heuristic_search(mods, bug_description, KB)
-
-    # 2. Real-time web search
     web_results = []
-    try:
-        web_results = await search_all(bug_description, mods)
-        log.info(f"Web search: {len(web_results)} results")
-    except Exception as exc:
-        log.warning(f"Web search failed: {exc}")
+    if include_web_search and search_queries:
+        try:
+            web_results = await search_with_queries(
+                search_queries,
+                bug_description,
+                filter_words=filter_words,
+            )
+            log.info(f"Web search: {len(web_results)} results, {len([r for r in web_results if r.get('url')])} with URLs")
+        except Exception as exc:
+            log.warning(f"Web search failed: {exc}")
 
-    # 3. Build rich LLM prompt
     prompt = _build_prompt(
-        mods=mods,
+        mods=relevant_mods,
         plugins=plugins,
         bug=bug_description,
         game=game,
         local_hits=local_hits,
         web_results=web_results,
+        investigation_brief=inv["brief"],
         load_order=load_order or [],
         file_conflicts=file_conflicts or [],
         overwrite_files=overwrite_files or [],
@@ -74,16 +129,27 @@ async def run_analysis(
     if llm_response.get("error") and not explanation:
         explanation = f"(LLM no disponible: {llm_response['error'][:120]}. Mostrando solo resultados locales.)"
 
+    # Extraer URLs - SIEMPRE incluir todas las que tengamos
+    urls = []
+    for r in web_results:
+        u = r.get("url") or r.get("URL") or ""
+        if u and str(u).startswith("http"):
+            urls.append(str(u))
+    urls = list(dict.fromkeys(urls))  # dedupe manteniendo orden
+
+    log.info(f"Returning {len(urls)} web_sources to client")
     return {
         "suspects": all_suspects,
         "explanation": explanation,
         "tokens_used": llm_response.get("tokens_used"),
-        "web_sources": [r.get("url", "") for r in web_results if r.get("url")],
+        "web_sources": urls,
+        "investigation_brief": inv["brief"],
     }
 
 
 def _build_prompt(
     mods, plugins, bug, game, local_hits, web_results,
+    investigation_brief: str,
     load_order, file_conflicts, overwrite_files, mod_metadata,
     skyrim_version, skse_version, papyrus_errors, skse_errors,
     response_language: str = "auto",
@@ -92,6 +158,10 @@ def _build_prompt(
 
     # Header
     sections.append(f'You are an expert {game} modding assistant. A user reports this bug:\n"{bug}"')
+
+    # Resumen del investigador local (análisis de archivos/conflictos)
+    if investigation_brief:
+        sections.append(f"LOCAL INVESTIGATION (file/conflict analysis):\n{investigation_brief}")
 
     # Game environment
     env_lines = []
@@ -173,12 +243,12 @@ def _build_prompt(
     sections.append(
         "CRITICAL RULES — FOLLOW EXACTLY:\n"
         f"1. ONLY use mod names from this list: [{mod_names_str}]\n"
-        "   NEVER invent mod names like 'Mod XYZ', 'ModA', 'ABC' or any name not in the list above.\n"
-        "2. Prioritize REAL FILE CONFLICTS and PAPYRUS ERRORS — these are hard evidence.\n"
-        "3. Use web search results as supporting community evidence.\n"
-        "4. Assign confidence 0.0-1.0 based on actual evidence, not guesses.\n"
-        f"5. {lang_instruction}\n"
-        "6. Be specific: mention exact files, exact positions, exact steps to fix.\n"
+        "2. ONLY suggest mods that could PLAUSIBLY cause THIS specific bug.\n"
+        "   Use LOCAL INVESTIGATION and WEB SEARCH RESULTS to inform your answer.\n"
+        "3. Prioritize mods in file conflicts that match the bug type.\n"
+        "4. The WEB SEARCH RESULTS include URLs — the user will see these as Fuentes/Links.\n"
+        "5. Assign confidence based on evidence (file conflicts + web posts + mod relevance).\n"
+        f"6. {lang_instruction}\n"
         "7. At the END output a JSON array in ```json ... ``` block:\n"
         '   [{"mod": "EXACT_MOD_NAME_FROM_LIST", "confidence": 0.0, "reason": "...", "fix": "..."}]'
     )

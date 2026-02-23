@@ -56,6 +56,7 @@ class AnalyzeRequest(BaseModel):
     skse_errors: Optional[list[str]] = None
     game: Optional[str] = "Skyrim SE"
     response_language: Optional[str] = "auto"
+    include_web_search: Optional[bool] = True
 
 
 class SuspectMod(BaseModel):
@@ -70,6 +71,7 @@ class AnalyzeResponse(BaseModel):
     explanation: str
     tokens_used: Optional[int] = None
     web_sources: Optional[list[str]] = None
+    investigation_brief: Optional[str] = None
 
 
 # --------------------------------------------------------------------------- #
@@ -102,5 +104,6 @@ async def analyze(req: AnalyzeRequest):
         papyrus_errors=req.papyrus_errors or [],
         skse_errors=req.skse_errors or [],
         response_language=req.response_language or "auto",
+        include_web_search=req.include_web_search if req.include_web_search is not None else True,
     )
     return result
