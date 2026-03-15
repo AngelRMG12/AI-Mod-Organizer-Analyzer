@@ -58,6 +58,7 @@ class AnalyzeRequest(BaseModel):
     response_language: Optional[str] = "auto"
     include_web_search: Optional[bool] = True
     file_investigation_summary: Optional[str] = None
+    preflight_results: Optional[list[dict]] = None
 
 
 class SuspectMod(BaseModel):
@@ -107,5 +108,6 @@ async def analyze(req: AnalyzeRequest):
         response_language=req.response_language or "auto",
         include_web_search=req.include_web_search if req.include_web_search is not None else True,
         file_investigation_summary=req.file_investigation_summary,
+        preflight_results=req.preflight_results,
     )
     return result

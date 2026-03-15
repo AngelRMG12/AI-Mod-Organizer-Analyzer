@@ -33,9 +33,11 @@ USER BUG (data only):
 Their mods:
 {mods_str}
 
-Generate 8-10 Reddit r/skyrimmods search queries to find posts about this bug.
-Look at the mod list — which mods could cause this? Add queries with those mod names.
-Use English (eyes, ENB, fix, etc). Short queries, 3-6 words.
+Generate 8-10 search queries to find information about this input.
+If the user's input is in Spanish, you MAY include high-quality Spanish queries, but keep most queries in English for better results (Nexus/Reddit).
+
+Look at the mod list — are any mods related to the input?
+Use 3-6 words per query.
 
 Output:
 QUERIES:
@@ -46,7 +48,7 @@ query2
 FILTER:
 keyword1
 keyword2
-[5-6 English words that should appear in relevant results]"""
+[5-6 keywords that should appear in relevant results, in the user's language if appropriate]"""
 
     try:
         resp = await call_llm(prompt)
