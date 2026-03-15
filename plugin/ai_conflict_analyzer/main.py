@@ -87,6 +87,34 @@ class AnalysisWorker(QThread):
 
     def run(self):
         try:
+            # Investigación profunda de carpetas (si tenemos path)
+            mods_path_str = self._payload.get("mods_base_path")
+            if mods_path_str:
+                try:
+                    import sys
+                    root = Path(__file__).resolve().parent.parent.parent
+                    if str(root) not in sys.path:
+                        sys.path.insert(0, str(root))
+                    from backend.file_scanner import scan_mod_folders
+                    from backend.local_investigator import investigate
+                    self.status.emit("Investigando carpetas de mods…")
+                    inv = investigate(
+                        self._payload.get("bug_description", ""),
+                        self._payload.get("file_conflicts", []),
+                        self._payload.get("overwrite_files", []),
+                        self._payload.get("mods", []),
+                    )
+                    summary = scan_mod_folders(
+                        Path(mods_path_str),
+                        self._payload.get("mods", []),
+                        self._payload.get("bug_description", ""),
+                        mods_to_prioritize=inv.get("priority_mods", []),
+                    )
+                    self._payload["file_investigation_summary"] = summary
+                except Exception:
+                    self._payload["file_investigation_summary"] = ""
+            self._payload.pop("mods_base_path", None)
+
             self.status.emit("Buscando en Reddit y Nexus Mods...")
             body = json.dumps(self._payload).encode("utf-8")
             req = urllib.request.Request(
@@ -95,7 +123,7 @@ class AnalysisWorker(QThread):
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=60) as resp:
+            with urllib.request.urlopen(req, timeout=86400) as resp:  # 24h, sin límite práctico
                 result = json.loads(resp.read().decode("utf-8"))
             self.finished.emit(result)
         except urllib.error.URLError:
@@ -259,6 +287,8 @@ class ConflictAnalyzerDialog(QDialog):
         if not self.chk_conflicts.isChecked():
             env["file_conflicts"] = []
 
+        mo2_base = Path(self._organizer.basePath())
+        mods_path = mo2_base / "mods"
         payload = {
             "mods":             env.get("mods", []),
             "plugins":          env.get("plugins", []),
@@ -273,6 +303,7 @@ class ConflictAnalyzerDialog(QDialog):
             "skse_errors":      env.get("skse_errors", []),
             "response_language": LANG_MAP.get(self.lang_combo.currentIndex(), "auto"),
             "include_web_search": self.chk_web.isChecked(),
+            "mods_base_path":   str(mods_path) if mods_path.exists() else None,
         }
 
         self.btn_analyze.setEnabled(False)

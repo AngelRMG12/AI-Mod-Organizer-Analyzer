@@ -20,7 +20,12 @@ from dataclasses import dataclass, asdict
 from urllib.parse import quote_plus
 
 import httpx
-from bs4 import BeautifulSoup
+
+try:
+    from bs4 import BeautifulSoup
+    HAS_BS4 = True
+except ImportError:
+    HAS_BS4 = False
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -87,15 +92,35 @@ class ConflictEntry:
     language: str = "en"
 
 
+# Nexus forum: suele bloquear scrapers (403). Intentamos headers de navegador.
+BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://forums.nexusmods.com/",
+}
+
+
+def _search_nexus_mods(keyword: str, limit: int = 5) -> list[dict]:
+    """Busca mods vía API Nexus (sin 403). Fallback si falla."""
+    try:
+        from scraper.nexus_api import search_nexus_mods
+        return search_nexus_mods(keyword, limit=limit)
+    except Exception as exc:
+        log.debug(f"Nexus API: {exc}")
+        return []
+
+
 class ConflictScraper:
     def __init__(self, llm_url: str = "http://localhost:11434", llm_model: str = "llama3"):
         self.llm_url = llm_url
         self.llm_model = llm_model
         self.session = httpx.Client(
-            headers={"User-Agent": "AI-Mod-Conflict-Analyzer/0.1 (educational)"},
+            headers={"User-Agent": "AI-Mod-Conflict-Analyzer/0.2"},
             timeout=30,
             follow_redirects=True,
         )
+        self._nexus_blocked = False  # Para no spamear log cuando 403
 
     def scrape_reddit(self, keyword: str, limit: int = 10) -> list[dict]:
         """Fetches Reddit posts via the JSON API (no auth needed)."""
@@ -183,21 +208,23 @@ class ConflictScraper:
 
     def search_with_queries(self, queries: list[str], limit_per_query: int = 5) -> list[dict]:
         """
-        Busca con múltiples queries (generadas por el investigador local).
-        Deduplica por URL y devuelve hasta 10 resultados.
+        Búsqueda profunda: Reddit + Nexus (API primero, forum como fallback).
         """
         seen_urls = set()
         all_results = []
-        for q in queries[:6]:
+        for q in queries[:12]:
             reddit, nexus = [], []
             try:
                 reddit = self.scrape_reddit(q, limit=limit_per_query)
             except Exception as e:
                 log.warning(f"Reddit failed for '{q[:40]}': {e}")
-            try:
-                nexus = self.scrape_nexus_forum(q)
-            except Exception:
-                pass
+            # Nexus: API primero (no da 403), luego forum si falla
+            nexus = _search_nexus_mods(q, limit=limit_per_query)
+            if not nexus:
+                try:
+                    nexus = self.scrape_nexus_forum(q)
+                except Exception:
+                    pass
             for p in reddit:
                 r = {
                     "source": "Reddit r/skyrimmods",
@@ -224,15 +251,23 @@ class ConflictScraper:
                     seen_urls.add(r["url"])
                     all_results.append(r)
         all_results.sort(key=lambda x: x.get("score", 0), reverse=True)
-        return all_results[:10]
+        return all_results[:20]
 
     def scrape_nexus_forum(self, keyword: str) -> list[dict]:
-        """Searches Nexus Mods forum via their search endpoint."""
+        """Searches Nexus Mods forum. Nexus suele bloquear scrapers (403)."""
+        if not HAS_BS4:
+            return []
+        if self._nexus_blocked:
+            return []
         q = quote_plus(keyword)
         url = f"https://forums.nexusmods.com/search/?q={q}&type=forums_topic"
         posts = []
         try:
-            resp = self.session.get(url)
+            resp = self.session.get(url, headers=BROWSER_HEADERS)
+            if resp.status_code == 403:
+                self._nexus_blocked = True
+                log.info("Nexus bloquea scrapers (403). Usando solo Reddit.")
+                return []
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "html.parser")
             for result in soup.select("li.ipsStreamItem")[:10]:
@@ -247,9 +282,13 @@ class ConflictScraper:
                         "text": snippet_el.get_text(strip=True) if snippet_el else "",
                         "url": href or "",
                     })
-            log.info(f"Nexus: found {len(posts)} results for '{keyword}'")
+            log.info(f"Nexus: found {len(posts)} for '{keyword[:40]}'")
         except Exception as exc:
-            log.warning(f"Nexus scrape failed for '{keyword}': {exc}")
+            if "403" in str(exc):
+                self._nexus_blocked = True
+                log.info("Nexus bloquea scrapers (403). Usando solo Reddit.")
+            else:
+                log.debug(f"Nexus: {exc}")
         return posts
 
     def classify_with_llm(self, post: dict) -> Optional[ConflictEntry]:

@@ -79,7 +79,7 @@ async def _call_ollama(prompt: str) -> dict:
         "prompt": prompt,
         "stream": False,
     }
-    async with httpx.AsyncClient(timeout=120) as client:
+    async with httpx.AsyncClient(timeout=None) as client:
         # Intentar primero /api/chat (versiones recientes)
         resp = await client.post(f"{OLLAMA_URL}/api/chat", json=payload_chat)
         if resp.status_code == 404:

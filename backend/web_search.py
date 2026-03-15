@@ -27,7 +27,7 @@ async def search_with_queries(
     raw_results = []
     seen_urls = set()
 
-    # 1. Scraper con múltiples queries (si disponible)
+    # 1. Scraper: búsqueda profunda (más queries, más resultados)
     if search_queries:
         try:
             from scraper.scraper import ConflictScraper
@@ -35,16 +35,16 @@ async def search_with_queries(
             raw_results = await asyncio.to_thread(
                 scraper.search_with_queries,
                 search_queries,
-                limit_per_query=6,
+                limit_per_query=8,
             )
             seen_urls = {r.get("url") for r in raw_results if r.get("url")}
             log.info(f"Scraper: {len(raw_results)} results")
         except Exception as exc:
             log.warning(f"Scraper failed: {exc}")
 
-    # 2. Reddit directo: todas las queries (scraper puede fallar o dar poco)
-    for q in search_queries[:6]:
-        fb = await search_reddit_fallback(q, limit=8)
+    # 2. Reddit directo: TODAS las queries para búsqueda profunda
+    for q in search_queries[:10]:
+        fb = await search_reddit_fallback(q, limit=10)
         for r in fb:
             if r.get("url") and r["url"] not in seen_urls:
                 raw_results.append(r)
@@ -56,9 +56,9 @@ async def search_with_queries(
     if filter_words:
         results = filter_relevant_results(raw_results, filter_words)
     else:
-        results = raw_results[:10]
+        results = raw_results[:15]
 
-    return results[:10]
+    return results[:15]
 
 
 def format_search_results_for_prompt(results: list[dict]) -> str:

@@ -57,6 +57,7 @@ class AnalyzeRequest(BaseModel):
     game: Optional[str] = "Skyrim SE"
     response_language: Optional[str] = "auto"
     include_web_search: Optional[bool] = True
+    file_investigation_summary: Optional[str] = None
 
 
 class SuspectMod(BaseModel):
@@ -105,5 +106,6 @@ async def analyze(req: AnalyzeRequest):
         skse_errors=req.skse_errors or [],
         response_language=req.response_language or "auto",
         include_web_search=req.include_web_search if req.include_web_search is not None else True,
+        file_investigation_summary=req.file_investigation_summary,
     )
     return result
