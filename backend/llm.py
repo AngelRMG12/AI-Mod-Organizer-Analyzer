@@ -37,6 +37,29 @@ CUSTOM_LLM_KEY = (os.environ.get("CUSTOM_LLM_KEY", "") or "").strip()
 CUSTOM_LLM_MODEL = (os.environ.get("CUSTOM_LLM_MODEL", "") or "").strip()
 
 
+async def classify_intent(user_input: str) -> str:
+    """
+    Quick LLM call to classify user intent.
+    Returns 'bug_report' or 'general_question'.
+    Falls back to 'bug_report' on error (safer default).
+    """
+    prompt = (
+        "Classify the following user input into exactly one of these two categories:\n"
+        "- bug_report: the user is describing a problem, bug, crash, visual glitch, or error in their game\n"
+        "- general_question: the user is asking a question or requesting information about their mods\n\n"
+        "Reply with ONLY the category name, nothing else.\n\n"
+        f"User input: {user_input.strip()[:300]}"
+    )
+    try:
+        result = await call_llm(prompt)
+        content = result.get("content", "").strip().lower()
+        if "general" in content:
+            return "general_question"
+        return "bug_report"
+    except Exception:
+        return "bug_report"
+
+
 async def call_llm(prompt: str) -> dict:
     if LLM_PROVIDER == "openai":
         return await _call_openai(prompt)

@@ -51,7 +51,7 @@ from standalone.path_detector import (
 from standalone.standalone_reader import collect_from_mo2
 from standalone.best_practices import BEST_PRACTICES, suggest_plugin_order
 from standalone.bug_templates import BUG_TEMPLATES
-from standalone.preflight_check import run_preflight
+from backend.preflight_check import run_preflight
 from standalone.history import init_db, save_analysis, get_recent, clear_history
 from standalone.loot_helper import detect_loot, LOOT_DOWNLOAD_URL
 
@@ -914,6 +914,27 @@ class StandaloneApp(QMainWindow):
         if not self.chk_conflicts.isChecked():
             env["file_conflicts"] = []
 
+        # Run preflight to get diagnostic data for the AI
+        game_path = self._env_data.get("game_path")
+        game_path = Path(game_path) if game_path else None
+        preflight = run_preflight(
+            game_path,
+            env.get("mods", []),
+            env.get("plugins", []),
+            game_name=env.get("game_name", "Skyrim SE"),
+            mo2_path=self._mo2_path
+        )
+
+        # Map language codes to full names for the AI
+        lang_code = LANG_MAP.get(self.lang_combo.currentIndex(), "auto")
+        lang_name = lang_code
+        if lang_code == "es": lang_name = "Spanish"
+        elif lang_code == "en": lang_name = "English"
+        elif lang_code == "fr": lang_name = "French"
+        elif lang_code == "de": lang_name = "German"
+        elif lang_code == "pt": lang_name = "Portuguese"
+        elif lang_code == "ja": lang_name = "Japanese"
+
         payload = {
             "mods": env.get("mods", []),
             "plugins": env.get("plugins", []),
@@ -926,9 +947,10 @@ class StandaloneApp(QMainWindow):
             "skse_version": env.get("skse_version"),
             "papyrus_errors": env.get("papyrus_errors", []),
             "skse_errors": env.get("skse_errors", []),
-            "response_language": LANG_MAP.get(self.lang_combo.currentIndex(), "auto"),
+            "response_language": lang_name,
             "include_web_search": self.chk_web.isChecked(),
             "mods_base_path": str(self._mo2_path / "mods") if self._mo2_path else None,
+            "preflight_results": preflight,
         }
 
         self.btn_analyze.setEnabled(False)

@@ -6,30 +6,14 @@ import json
 import logging
 from typing import Optional
 
-from .llm import call_llm
-from .knowledge import load_knowledge_base, local_heuristic_search
-from .web_search import search_with_queries, format_search_results_for_prompt
-from .local_investigator import investigate
-from .search_planner import generate_search_queries, extract_filter_words
+from backend.llm import call_llm, classify_intent
+from backend.knowledge import load_knowledge_base, local_heuristic_search
+from backend.web_search import search_with_queries, format_search_results_for_prompt
+from backend.local_investigator import investigate
+from backend.search_planner import generate_search_queries, extract_filter_words
 
 log = logging.getLogger(__name__)
 KB = load_knowledge_base()
-
-# Bug #2: detect general queries so we can skip web search + simplify prompt
-_GENERAL_KW = {
-    "list", "lista", "show", "muestra", "what mods", "qué mods", "cuáles",
-    "tengo", "have", "display", "enumerate", "graphic", "gráfico", "gráficos",
-    "categorize", "categoriza", "tell me", "dime", "which mods", "cuales",
-    "menciona", "nombra", "describe my", "mis mods",
-}
-_BUG_KW = {
-    "crash", "ctd", "error", "bug", "broken", "roto", "falla", "negro", "black",
-    "freeze", "lag", "missing", "invisible", "tpose", "t-pose", "corrupted", "corrupto",
-}
-
-def _is_general_query(text: str) -> bool:
-    lower = text.lower()
-    return any(kw in lower for kw in _GENERAL_KW) and not any(kw in lower for kw in _BUG_KW)
 
 # Bug #4: infer graphic/audio/gameplay category from mod name when metadata lacks it
 _CATEGORY_HINTS = {
@@ -112,11 +96,10 @@ async def run_analysis(
     relevant_mods = _prefilter_mods(mods, bug_description, file_conflicts or [], inv.get("priority_mods", []))
     log.info(f"Mods: {len(mods)} → {len(relevant_mods)} relevant")
 
-    # Bug #2 fix: skip web search for general questions (listing, categorizing, etc.)
-    # Web results contaminate the response with generic mod info unrelated to the user's install.
-    is_general = _is_general_query(bug_description)
-    if is_general:
-        log.info("General query detected — skipping web search to avoid hallucination from generic results")
+    # Classify intent with a quick LLM call — much more robust than keyword matching
+    intent = await classify_intent(bug_description)
+    is_general = intent == "general_question"
+    log.info(f"Intent classified as: {intent}")
 
     # 3. LLM genera queries + filter keywords (cero hardcode)
     search_queries = []
@@ -239,11 +222,12 @@ def _build_prompt(
         )
 
     # Resumen del investigador local (análisis de archivos/conflictos)
-    if investigation_brief:
+    # Skip for general queries — file conflict data distracts the LLM from answering the question
+    if investigation_brief and not is_general:
         sections.append(f"LOCAL INVESTIGATION (file/conflict analysis):\n{investigation_brief}")
 
     # Investigación profunda: carpetas de mods escaneadas en disco
-    if file_investigation_summary:
+    if file_investigation_summary and not is_general:
         sections.append(file_investigation_summary)
 
     # Game environment
@@ -271,33 +255,32 @@ def _build_prompt(
         plugin_lines = "\n".join(f"- {p}" for p in plugins[:80])
         sections.append(f"PLUGIN LOAD ORDER:\n{plugin_lines}")
 
-    # Real file conflicts (most important section)
-    if file_conflicts:
-        conflict_lines = []
-        for c in file_conflicts[:40]:
-            conflict_lines.append(
-                f"- FILE: {c['file']}\n"
-                f"  Conflict between: {', '.join(c['mods'])}\n"
-                f"  Winner (loads last): {c['winner']}"
+    # Real file conflicts, overwrite, papyrus — only for bug diagnosis, not general queries
+    if not is_general:
+        if file_conflicts:
+            conflict_lines = []
+            for c in file_conflicts[:40]:
+                conflict_lines.append(
+                    f"- FILE: {c['file']}\n"
+                    f"  Conflict between: {', '.join(c['mods'])}\n"
+                    f"  Winner (loads last): {c['winner']}"
+                )
+            sections.append(
+                f"REAL FILE CONFLICTS ({len(file_conflicts)} detected — these are actual overwrite conflicts):\n"
+                + "\n".join(conflict_lines)
             )
-        sections.append(
-            f"REAL FILE CONFLICTS ({len(file_conflicts)} detected — these are actual overwrite conflicts):\n"
-            + "\n".join(conflict_lines)
-        )
 
-    # Overwrite folder
-    if overwrite_files:
-        sections.append(
-            f"OVERWRITE FOLDER ({len(overwrite_files)} unmanaged files):\n"
-            + "\n".join(f"- {f}" for f in overwrite_files[:20])
-        )
+        if overwrite_files:
+            sections.append(
+                f"OVERWRITE FOLDER ({len(overwrite_files)} unmanaged files):\n"
+                + "\n".join(f"- {f}" for f in overwrite_files[:20])
+            )
 
-    # Papyrus errors (gold mine for diagnosis)
-    if papyrus_errors:
-        sections.append(
-            f"PAPYRUS SCRIPT ERRORS ({len(papyrus_errors)} errors in log):\n"
-            + "\n".join(papyrus_errors[:20])
-        )
+        if papyrus_errors:
+            sections.append(
+                f"PAPYRUS SCRIPT ERRORS ({len(papyrus_errors)} errors in log):\n"
+                + "\n".join(papyrus_errors[:20])
+            )
 
     # Pre-flight results (Critical basic solutions)
     if preflight_results:
