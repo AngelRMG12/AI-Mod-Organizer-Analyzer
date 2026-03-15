@@ -129,6 +129,20 @@ def find_overwrite_files(mo2_base_path: Path) -> list[str]:
 # Mod metadata (meta.ini in each mod folder)                                   #
 # --------------------------------------------------------------------------- #
 
+# Nexus Mods category IDs → readable names (Skyrim SE / general)
+_NEXUS_CATEGORIES = {
+    "5": "Armour", "6": "Audio", "8": "Clothing", "9": "Combat",
+    "10": "Creatures", "12": "Followers", "15": "Gameplay",
+    "17": "Graphics", "18": "Hair and Face", "21": "Items",
+    "22": "Items - World", "24": "Landscape", "25": "Lore and Quests",
+    "26": "Magic", "27": "Spells", "28": "Miscellaneous",
+    "30": "Models and Textures", "32": "NPC", "34": "Patches",
+    "39": "Races", "40": "Quests", "43": "Sounds and Music",
+    "46": "Utilities", "49": "Weapons", "51": "User Interface",
+    "55": "Clothing - Armour", "56": "Animation", "57": "Companions",
+    "66": "ENBSeries", "67": "Followers",
+}
+
 def read_mod_metadata(mods_base_path: Path, mod_name: str) -> dict:
     """
     Reads the meta.ini that MO2 creates for each installed mod.
@@ -145,7 +159,9 @@ def read_mod_metadata(mods_base_path: Path, mod_name: str) -> dict:
         general = cfg["General"] if "General" in cfg else {}
         info["version"] = general.get("version") or general.get("Version")
         info["nexus_id"] = general.get("modid") or general.get("ModID")
-        info["category"] = general.get("category") or general.get("Category")
+        raw_cat = general.get("category") or general.get("Category") or ""
+        # Nexus stores category as a numeric ID — convert to readable name
+        info["category"] = _NEXUS_CATEGORIES.get(str(raw_cat).strip(), raw_cat) or None
     except Exception:
         pass
     return info
@@ -285,7 +301,7 @@ def collect_environment(
         ][:100]  # cap at 100 most important
 
     overwrite = find_overwrite_files(mo2_base_path)
-    mod_metadata = read_all_mod_metadata(mods_path, active_mods[:50])  # cap at 50 for perf
+    mod_metadata = read_all_mod_metadata(mods_path, active_mods)
 
     skyrim_version = None
     skse_version = None

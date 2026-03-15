@@ -97,6 +97,8 @@ class AnalysisWorker(QThread):
                         sys.path.insert(0, str(root))
                     from backend.file_scanner import scan_mod_folders
                     from backend.local_investigator import investigate
+                    from backend.preflight_check import run_preflight
+                    
                     self.status.emit("Investigando carpetas de mods…")
                     inv = investigate(
                         self._payload.get("bug_description", ""),
@@ -111,6 +113,19 @@ class AnalysisWorker(QThread):
                         mods_to_prioritize=inv.get("priority_mods", []),
                     )
                     self._payload["file_investigation_summary"] = summary
+                    
+                    # Run preflight if not already in payload
+                    if "preflight_results" not in self._payload:
+                        self.status.emit("Ejecutando diagnóstico rápido…")
+                        gp = self._payload.get("game_path")
+                        mp = self._payload.get("mo2_path")
+                        self._payload["preflight_results"] = run_preflight(
+                            Path(gp) if gp else None,
+                            self._payload.get("mods", []),
+                            self._payload.get("plugins", []),
+                            game_name=self._payload.get("game_name", "Skyrim SE"),
+                            mo2_path=Path(mp) if mp else None
+                        )
                 except Exception:
                     self._payload["file_investigation_summary"] = ""
             self._payload.pop("mods_base_path", None)
@@ -289,6 +304,13 @@ class ConflictAnalyzerDialog(QDialog):
 
         mo2_base = Path(self._organizer.basePath())
         mods_path = mo2_base / "mods"
+        
+        # Map language codes to full names for the AI
+        lang_code = LANG_MAP.get(self.lang_combo.currentIndex(), "auto")
+        lang_name = lang_code
+        # (LANG_MAP already has full names for 1-6, but let's be safe)
+        if lang_code == "auto": lang_name = "auto"
+
         payload = {
             "mods":             env.get("mods", []),
             "plugins":          env.get("plugins", []),
@@ -301,9 +323,11 @@ class ConflictAnalyzerDialog(QDialog):
             "skse_version":     env.get("skse_version"),
             "papyrus_errors":   env.get("papyrus_errors", []),
             "skse_errors":      env.get("skse_errors", []),
-            "response_language": LANG_MAP.get(self.lang_combo.currentIndex(), "auto"),
-            "include_web_search": self.chk_web.isChecked(),
+            "response_language": lang_name,
             "mods_base_path":   str(mods_path) if mods_path.exists() else None,
+            "game_path":        str(Path(self._organizer.managedGame().gameDirectory().absolutePath())),
+            "mo2_path":         str(Path(self._organizer.basePath())),
+            "game_name":        self._organizer.managedGame().gameName(),
         }
 
         self.btn_analyze.setEnabled(False)
