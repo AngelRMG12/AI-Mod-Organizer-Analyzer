@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E \"\\\\.py$\")",
+      "Bash(code --reuse-window \"c:/Users/angel/Downloads/Plugin by Angel/AI-Mod-Organizer-Analyzer\")"
+    ]
+  }
+}

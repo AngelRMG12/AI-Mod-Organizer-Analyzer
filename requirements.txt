@@ -1,0 +1,17 @@
+# AI Conflict Analyzer - Dependencias
+# pip install -r requirements.txt
+
+# Backend / LLM
+httpx>=0.24
+python-dotenv>=1.0
+
+# GUI (standalone)
+PyQt6>=6.4
+# Alternativa si PyQt6 falla: PyQt5>=5.15
+
+# Web scraping (Reddit + Nexus)
+beautifulsoup4>=4.12
+
+# Opcional: para .exe con PyInstaller
+# pip install pyinstaller
+# py -m PyInstaller build_exe.spec
